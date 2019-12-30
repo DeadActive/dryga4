@@ -2,6 +2,6 @@ module.exports = {
   configureWebpack: {
     devtool: 'source-map',
   },
-
-  lintOnSave: false
+  publicPath: '<dryga4>',
+  lintOnSave: false,
 }

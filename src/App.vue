@@ -74,6 +74,7 @@
             "
             value="Построить"
           />
+          <input type="file" @change="importKML($event)" value="Импорт KML" />
         </div>
       </div>
       <div class="custom-control" v-if="isCustom">
@@ -157,6 +158,7 @@ import 'leaflet/dist/leaflet.css'
 import 'leaflet-path-transform'
 import '@geoman-io/leaflet-geoman-free'
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
+import { kml } from '@mapbox/leaflet-omnivore'
 import { isNull } from 'util'
 
 export default {
@@ -307,6 +309,24 @@ export default {
     })
   },
   methods: {
+    importKML: function(e) {
+      const file = e.target.files[0]
+      const reader = new FileReader()
+
+      reader.onload = e => {
+        const kmltext = e.target.result
+        let poly = kml.parse(kmltext)
+        let latlngs = coordAll(flip(poly.toGeoJSON()))
+        this.polygon.pm.disable()
+        this.polygon.setLatLngs(latlngs)
+        this.polygon.pm.enable({
+          allowSelfIntersection: false,
+          snappable: false,
+        })
+        this.map.fitBounds(this.polygon.getBounds())
+      }
+      reader.readAsText(file)
+    },
     centerPolygon: function() {
       let mapCenter = point([
         this.map.getCenter().lat,

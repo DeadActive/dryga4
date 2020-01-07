@@ -8,6 +8,7 @@
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
+    "@geoman-io/leaflet-geoman-free": "^2.3.0",
     "@turf/turf": "^5.1.6",
     "core-js": "^3.4.4",
     "leaflet": "^1.6.0",

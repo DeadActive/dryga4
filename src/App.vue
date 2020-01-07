@@ -11,23 +11,46 @@
           >
         </select>
         <div class="input-wrapper">
+          <label for="customSwitch">Свои параметры дрона&nbsp;</label>
+          <input
+            type="checkbox"
+            name="customSwitch"
+            id="customSwitch"
+            v-model="isCustom"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="gsdSwitch">{{ isGSDWords }}</label>
+          <input
+            type="checkbox"
+            name="gsdSwitch"
+            id="gsdSwitch"
+            v-model="isGSD"
+          />
+        </div>
+
+        <div class="input-wrapper" v-if="!isGSD">
           <label for="height">Высота(м) :</label>
           <input type="number" v-model="height" name="height" :step="1" />
         </div>
+        <div class="input-wrapper" v-else>
+          <label for="GSD">GSD :</label>
+          <input type="number" v-model="GSD" name="GSD" :step="0.005" />
+        </div>
         <div class="input-wrapper">
-          <label for="px">Px% : </label>
+          <label for="px">Px% :</label>
           <input type="number" v-model="px" name="px" :step="1" />
         </div>
         <div class="input-wrapper">
-          <label for="py">Py% : </label>
+          <label for="py">Py% :</label>
           <input type="number" v-model="py" name="py" :step="1" />
         </div>
         <div class="input-wrapper">
-          <label for="speed">Скорость(м/с) : </label>
+          <label for="speed">Скорость(м/с) :</label>
           <input type="number" v-model="speed" name="speed" :step="1" />
         </div>
         <div class="input-wrapper">
-          <label for="offset">Оффсет : </label>
+          <label for="offset">Оффсет :</label>
           <input
             type="number"
             v-model="offset"
@@ -37,15 +60,65 @@
           />
         </div>
         <div v-if="drone" class="info-wrapper">
-          GSD: {{ gsd.toFixed(4) }} m/px <br />
-          Время полета: {{ flightTime }} с <br />
+          GSD: {{ parseFloat(gsd).toFixed(4) }} m/px
+          <br />
+          Высота: {{ parseFloat(heightComp).toFixed(0) }} m
+          <br />
+          Время полета: {{ flightTime }} с
+          <br />
           <input
             type="button"
-            @click.prevent="createRoutes()"
+            @click.prevent="
+              createRoutes()
+              slice()
+            "
             value="Построить"
           />
-          <input type="button" value="Срезать" @click.prevent="slice()" />
         </div>
+      </div>
+      <div class="custom-control" v-if="isCustom">
+        <div class="input-wrapper">
+          <label for="widthpx">Ширина кадра(px) :</label>
+          <input
+            type="number"
+            v-model="drone.widthPx"
+            name="widthpx"
+            :step="1"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="heightpx">Высота кадра(px) :</label>
+          <input
+            type="number"
+            v-model="drone.heightPx"
+            name="heightpx"
+            :step="1"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="width">Ширина матрицы(мм) :</label>
+          <input type="number" v-model="drone.width" name="width" :step="0.1" />
+        </div>
+        <div class="input-wrapper">
+          <label for="height">Высота матрицы(мм) :</label>
+          <input
+            type="number"
+            v-model="drone.height"
+            name="height"
+            :step="0.1"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="focal">Фокусное растояние(мм) :</label>
+          <input type="number" v-model="drone.focal" name="focal" :step="0.1" />
+        </div>
+      </div>
+      <div
+        class="controlCenter"
+        @click.prevent="centerPolygon()"
+        v-if="!isOnScreen"
+      >
+        <img src="@/assets/center.png" alt="center" />
       </div>
     </div>
   </div>
@@ -73,13 +146,17 @@ import {
   transformScale,
   bearing,
   rhumbBearing,
+  lineString,
+  intersect,
+  transformTranslate,
+  bearingToAzimuth,
 } from '@turf/turf'
 import { lineSliceAtIntersection } from 'turf-line-slice-at-intersection'
 import 'normalize.css'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-path-transform'
-import 'leaflet-draw'
-import 'leaflet-draw/dist/leaflet.draw.css'
+import '@geoman-io/leaflet-geoman-free'
+import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 import { isNull } from 'util'
 
 export default {
@@ -96,14 +173,20 @@ export default {
       height: 80,
       px: 70,
       py: 35,
+      isGSD: false,
+      isCustom: false,
+      GSD: 0.035,
       drawControl: null,
       bSquare: null,
       route: null,
+      slicedRoute: null,
+      centerControl: null,
       angle: 0,
       prevYaw: 0,
       speed: 10,
       flightTime: 0,
       offset: 1.0,
+      isOnScreen: true,
       polygonInit: {
         type: 'Feature',
         properties: {},
@@ -159,40 +242,97 @@ export default {
           '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(this.map)
 
-      this.features = new L.FeatureGroup()
-      this.map.addLayer(this.features)
+      // this.features = new L.FeatureGroup()
+      // this.map.addLayer(this.features)
 
-      this.polygon = L.polygon(coordAll(flip(this.polygonInit))).addTo(
-        this.features
-      )
+      this.polygon = L.polygon(coordAll(flip(this.polygonInit)), {
+        pmIgnore: false,
+      }).addTo(this.map)
+      this.polygon.pm.enable({
+        allowSelfIntersection: false,
+        snappable: false,
+      })
+
+      // this.polygon.options.editing = {}
+      // this.polygon.editing.enable()
 
       this.bSquare = L.geoJSON(
-        bboxPolygon(this.squreBbox(bbox(this.polygon.toGeoJSON())))
-      ).addTo(this.features)
+        bboxPolygon(this.squreBbox(bbox(this.polygon.toGeoJSON()))),
+        {
+          style: {
+            opacity: 0,
+            fillOpacity: 0,
+          },
+        }
+      ).addTo(this.map)
 
       this.route = L.polyline(
         [
           [0, 0],
           [1, 1],
         ],
-        { transform: true }
-      ).addTo(this.features)
+        {
+          transform: true,
+          opacity: 0,
+        }
+      ).addTo(this.map)
 
-      this.drawControl = new L.Control.Draw({
-        position: 'topright',
-        draw: false,
-        edit: {
-          featureGroup: this.features,
-        },
-      })
-      this.map.addControl(this.drawControl)
+      this.slicedRoute = L.polyline([
+        [0, 0],
+        [1, 1],
+      ]).addTo(this.map)
+
+      // this.drawControl = new L.Control.Draw({
+      //   position: 'topright',
+      //   draw: false,
+      //   edit: {
+      //     featureGroup: this.features,
+      //   },
+      // })
+      // this.map.addControl(this.drawControl)
+
+      L.Circle.prototype.getCenter = L.Circle.prototype.getLatLng
+
+      L.Handler['PathDrag'].prototype.updateLatLng = function() {}
+
+      L.Handler['PathTransform'].prototype._getBoundingPolygon = function() {
+        return new L.Rectangle(
+          this._path.getBounds(),
+          this.options.boundsOptions
+        )
+      }
 
       this.initEvents()
+      this.drone = this.droneModels[0]
     })
   },
   methods: {
-    slice: function() {
-      let route = flip(this.route.toGeoJSON())
+    centerPolygon: function() {
+      let mapCenter = point([
+        this.map.getCenter().lat,
+        this.map.getCenter().lng,
+      ])
+      let polyCenter = centroid(flip(this.polygon.toGeoJSON()))
+
+      let centerDist = distance(polyCenter, mapCenter)
+      let centerRhumb = rhumbBearing(polyCenter, mapCenter)
+
+      let newCoords = transformTranslate(
+        flip(this.polygon.toGeoJSON()),
+        centerDist,
+        centerRhumb
+      )
+      this.polygon.pm.disable()
+      this.polygon.setLatLngs(coordAll(newCoords))
+      this.polygon.pm.enable({
+        allowSelfIntersection: false,
+        snappable: false,
+      })
+
+      this.isOnScreen = true
+    },
+    slice: function(routeObj = this.route) {
+      let route = flip(routeObj.toGeoJSON())
       let poly = flip(
         transformScale(this.polygon.toGeoJSON(), parseFloat(this.offset))
       )
@@ -264,27 +404,48 @@ export default {
         }
       }
 
-      this.route.setLatLngs(final)
-      this.route.transform.reset()
-      this.route.transform.disable()
+      this.slicedRoute.setLatLngs(final)
+      //this.route.transform.reset()
+      //this.route.transform.disable()
 
       this.flightTime = (
-        (length(this.route.toGeoJSON()) * 1000) /
+        (length(lineString(final)) * 1000) /
         this.speed
       ).toFixed(0)
     },
     onEditVertex: function(e) {
-      let box = bbox(e.poly.toGeoJSON())
+      let box = bbox(e.target.toGeoJSON())
       let fixedBox = this.squreBbox(box)
       let bPoly = bboxPolygon(fixedBox)
-      this.polygon = e.poly
+      this.polygon = e.target
       this.bSquare.clearLayers()
       this.bSquare.addData(bPoly)
+      this.createRoutes()
+      this.slice(this.route)
+    },
+    onMapMoveEnd: function(e) {
+      let boundLatLng = this.map.getBounds()
+
+      let bounds = [
+        boundLatLng._southWest.lat,
+        boundLatLng._southWest.lng,
+        boundLatLng._northEast.lat,
+        boundLatLng._northEast.lng,
+      ]
+      let boundsBox = bboxPolygon(bounds)
+      this.isOnScreen = isNull(
+        intersect(boundsBox, flip(this.polygon.toGeoJSON()))
+      )
+        ? false
+        : true
     },
     initEvents: function() {
-      this.map.on('draw:editvertex', e => this.onEditVertex(e))
+      let self = this
+      this.polygon.on('pm:markerdragend', e => this.onEditVertex(e))
+      this.map.on('moveend', e => this.onMapMoveEnd(e))
       this.route.addEventListener('rotateend', function(e) {
-        this.route = e.layer
+        //self.route = e.layer
+        self.slice(self.route)
       })
     },
     squreBbox: function(box) {
@@ -441,22 +602,26 @@ export default {
         //  ])
         //}
       }
+      this.route.transform.disable()
       this.route.setLatLngs(routeLatlngs)
       this.route.transform.reset()
-      this.route.transform.disable()
       this.route.transform.enable({ rotation: true, scaling: false })
     },
   },
   computed: {
     gsd: function() {
-      let gsdH =
-        (this.height * (this.drone.height / 1000)) /
-        ((this.drone.focal / 1000) * this.drone.heightPx)
-      let gsdW =
-        (this.height * (this.drone.width / 1000)) /
-        ((this.drone.focal / 1000) * this.drone.widthPx)
+      if (!this.isGSD) {
+        let gsdH =
+          (this.height * (this.drone.height / 1000)) /
+          ((this.drone.focal / 1000) * this.drone.heightPx)
+        let gsdW =
+          (this.height * (this.drone.width / 1000)) /
+          ((this.drone.focal / 1000) * this.drone.widthPx)
 
-      return gsdH > gsdW ? gsdH : gsdW
+        return gsdH > gsdW ? gsdH : gsdW
+      } else {
+        return this.GSD
+      }
     },
     bx: function() {
       return ((this.drone.widthPx * (100 - this.px)) / 100) * this.gsd
@@ -480,6 +645,15 @@ export default {
     routesCount: function() {
       return Math.ceil(this.dy / this.by + 1)
     },
+    isGSDWords: function() {
+      return this.isGSD ? 'GSD ' : 'Высота '
+    },
+    heightComp: function() {
+      return this.isGSD
+        ? (this.GSD * this.drone.focal * this.drone.heightPx) /
+            this.drone.height
+        : this.height
+    },
   },
   components: {},
 }
@@ -501,7 +675,21 @@ export default {
   display: flex;
   justify-content: flex-start;
   align-content: center;
-  flex-direction: row;
+  flex-direction: column;
+}
+
+.controlCenter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  transform: translate(-50%, -50%);
+  z-index: 999;
+  cursor: pointer;
+}
+
+.controlCenter img {
+  opacity: 0.6;
 }
 
 .custom-control {
@@ -512,6 +700,7 @@ export default {
   margin-top: 100px;
   margin-left: 10px;
   max-height: 30vh;
+  max-width: 20%;
   padding: 10px;
   background: #fff;
   border-radius: 5px;
